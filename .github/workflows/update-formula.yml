@@ -47,7 +47,14 @@ jobs:
           case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::unexpected VERSION '$v'"; exit 1 ;; esac
           echo "skip=true" >> "$GITHUB_OUTPUT"
           case "$v" in 0.*) echo "::notice::$v is a pre-1.0 internal version; the tap publishes 1.x only"; exit 0 ;; esac
-          if [ -f Formula/camy.rb ] && grep -q "version \"$v\"" Formula/camy.rb; then echo "::notice::formula already at $v"; exit 0; fi
+          # Never move the formula backwards: a channel VERSION older than the
+          # formula is a rollback or a tampered channel, not an update.
+          cur=$(sed -n 's/^  version "\(.*\)"$/\1/p' Formula/camy.rb 2>/dev/null || true)
+          if [ -n "$cur" ] && [ "$(printf '%s\n%s\n' "$cur" "$v" | sort -V | tail -1)" != "$v" ]; then
+            echo "::notice::channel VERSION $v is older than the formula's $cur; refusing to roll back"; exit 0
+          fi
+          # A formula that already names this version is still regenerated and
+          # compared below, so a hand-edited formula is corrected, not trusted.
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -131,6 +138,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Regenerated every run; commit only when the bytes changed, so a
+          # hand-edited formula is corrected and an unchanged one is a no-op.
+          if git diff --quiet -- Formula/camy.rb; then echo "::notice::Formula/camy.rb already matches $V"; exit 0; fi
           git add Formula/camy.rb
           git commit -m "camy $V"
           git push origin HEAD:main
